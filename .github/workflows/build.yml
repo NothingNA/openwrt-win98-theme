@@ -1,239 +1,39 @@
-name: Build OpenWrt APK
+name: Theme Build & Release
 
 on:
   push:
+    tags:
+      - "v*"
     branches:
-      - "main"
-      - "master"
+      - master
+      - "feat/**"
   workflow_dispatch:
-    inputs:
-      openwrt_version:
-        description: 'OpenWrt version'
-        required: false
-        default: '23.05.5'
-        type: string
-      target:
-        description: 'Target platform'
-        required: false
-        default: 'x86/64'
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  build-apk:
-    name: Build OpenWrt APK Package
+  build:
+    name: build luci-theme-win98 ${{ matrix.pkg_type }}
     runs-on: ubuntu-latest
+    # Tag pushes and manual dispatches always run; branch pushes only run
+    # when the head commit message contains the [build] marker, so feat
+    # branches opt in per-commit instead of firing on every push.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_type == 'tag' ||
+      contains(github.event.head_commit.message, '[build]')
     strategy:
       matrix:
-        # 可以构建多个架构
-        target:
-          - x86/64
-          - aarch64_cortex-a53
-        include:
-          - target: x86/64
-            arch: x86_64
-            sdk_suffix: x86-64
-          - target: aarch64_cortex-a53
-            arch: aarch64
-            sdk_suffix: aarch64_cortex-a53
-
+        pkg_type: [ipk, apk]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: eamonxg/build-luci-package@master
         with:
-          fetch-depth: 0
-
-      - name: Set up environment
-        run: |
-          echo "OPENWRT_VERSION=${{ github.event.inputs.openwrt_version || '23.05.5' }}" >> $GITHUB_ENV
-          echo "TARGET=${{ matrix.target }}" >> $GITHUB_ENV
-          echo "ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libssl-dev \
-            libncurses5-dev \
-            unzip \
-            gawk \
-            gettext \
-            git \
-            file \
-            wget \
-            tar \
-            python3 \
-            python3-distutils \
-            python3-dev \
-            rsync \
-            xz-utils \
-            bzip2 \
-            flex \
-            bison \
-            patch \
-            perl \
-            ccache \
-            time
-
-      - name: Download OpenWrt SDK
-        run: |
-          SDK_VERSION="${{ env.OPENWRT_VERSION }}"
-          SDK_TARGET="${{ matrix.target }}"
-          
-          # 构建 SDK 下载 URL
-          SDK_URL="https://downloads.openwrt.org/releases/${SDK_VERSION}/targets/${SDK_TARGET}/openwrt-sdk-${SDK_VERSION}-${SDK_TARGET//\//-}_gcc-*.Linux-x86_64.tar.xz"
-          
-          # 获取实际文件名
-          SDK_FILE=$(curl -s "${SDK_URL}" | grep -o 'openwrt-sdk-[^"]*\.tar\.xz' | head -1)
-          if [ -z "$SDK_FILE" ]; then
-            echo "Error: Could not find SDK for ${SDK_VERSION}/targets/${SDK_TARGET}"
-            exit 1
-          fi
-          
-          FULL_URL="https://downloads.openwrt.org/releases/${SDK_VERSION}/targets/${SDK_TARGET}/${SDK_FILE}"
-          echo "Downloading: ${FULL_URL}"
-          
-          wget -O openwrt-sdk.tar.xz "${FULL_URL}"
-          tar -xf openwrt-sdk.tar.xz
-          SDK_DIR=$(tar -tf openwrt-sdk.tar.xz | head -1 | cut -d/ -f1)
-          echo "SDK_DIR=${SDK_DIR}" >> $GITHUB_ENV
-
-      - name: Prepare package source
-        run: |
-          # 复制包源代码到 SDK 的 package 目录
-          cp -r . ${SDK_DIR}/package/luci-theme-win98
-          
-          # 如果包目录有 Makefile，确保它存在
-          if [ ! -f "${SDK_DIR}/package/luci-theme-win98/Makefile" ]; then
-            echo "Warning: Makefile not found in package/luci-theme-win98/"
-            # 创建一个简单的 Makefile 示例
-            cat > ${SDK_DIR}/package/luci-theme-win98/Makefile << 'EOF'
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=luci-theme-win98
-PKG_VERSION:=1.0.0
-PKG_RELEASE:=1
-
-include $(INCLUDE_DIR)/package.mk
-
-define Package/luci-theme-win98
-  SECTION:=luci
-  CATEGORY:=LuCI
-  SUBMENU:=3. Applications
-  TITLE:=Win98 theme for LuCI
-  PKGARCH:=all
-  DEPENDS:=+luci-base
-endef
-
-define Package/luci-theme-win98/description
-  Windows 98 theme for LuCI web interface
-endef
-
-define Build/Compile
-endef
-
-define Package/luci-theme-win98/install
-  $(INSTALL_DIR) $$(1)/usr/lib/lua/luci/view/themes/win98
-  $(CP) ./htdocs/* $$(1)/usr/lib/lua/luci/view/themes/win98/
-endef
-
-$(eval $(call BuildPackage,luci-theme-win98))
-EOF
-          fi
-
-      - name: Build the package
-        run: |
-          cd ${SDK_DIR}
-          
-          # 更新 feeds
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          
-          # 配置构建选项
-          echo "CONFIG_PACKAGE_luci-theme-win98=y" >> .config
-          make defconfig
-          
-          # 编译包
-          make package/luci-theme-win98/compile V=s || {
-            echo "Build failed. Checking logs..."
-            find . -name "*.log" -exec cat {} \;
-            exit 1
-          }
-
-      - name: Collect built APK
-        id: collect
-        run: |
-          APK_DIR="${SDK_DIR}/bin/packages/${{ matrix.arch }}/luci"
-          if [ -d "${APK_DIR}" ]; then
-            APK_FILE=$(find "${APK_DIR}" -name "luci-theme-win98*.apk" | head -1)
-            if [ -n "${APK_FILE}" ]; then
-              cp "${APK_FILE}" "luci-theme-win98-${{ matrix.arch }}.apk"
-              echo "apk_file=luci-theme-win98-${{ matrix.arch }}.apk" >> $GITHUB_OUTPUT
-              echo "Found APK: ${APK_FILE}"
-            else
-              echo "No APK file found"
-              exit 1
-            fi
-          else
-            echo "Build directory not found"
-            exit 1
-          fi
-
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          
-          # 获取 commit SHA
-          if [ "${{ github.event_name }}" = "push" ]; then
-            SHA="${{ github.sha }}"
-          else
-            SHA="${{ github.event.inputs.sha || github.sha }}"
-          fi
-          
-          SHORT_SHA="${SHA:0:12}"
-          TAG="apk-${SHORT_SHA}"
-          APK_FILE="${{ steps.collect.outputs.apk_file }}"
-          
-          if [ -z "${APK_FILE}" ]; then
-            echo "No APK file to upload"
-            exit 1
-          fi
-          
-          # 创建或更新 release
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Uploading to existing release: ${TAG}"
-            gh release upload "${TAG}" "${APK_FILE}" --clobber
-          else
-            echo "Creating new release: ${TAG}"
-            gh release create "${TAG}" "${APK_FILE}" \
-              --target "${SHA}" \
-              --title "luci-theme-win98 ${SHORT_SHA} (${{ matrix.target }})" \
-              --notes "Automated APK build for commit ${SHA}. Target: ${{ matrix.target }}" \
-              --latest=false
-          fi
-
-  summary:
-    name: Build Summary
-    runs-on: ubuntu-latest
-    needs: build-apk
-    if: always()
-    steps:
-      - name: Check build status
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          
-          for target in "${{ join(matrix.target, ' ') }}"; do
-            if [ "${{ needs.build-apk.result }}" = "success" ]; then
-              echo "| ${target} | ✅ Success |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| ${target} | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+          package: luci-theme-win98
+          pkg_type: ${{ matrix.pkg_type }}
+          prep_script: |
+            ./scripts/feeds update -f base luci
+            ./scripts/feeds install -p luci-base
+          artifact_paths: |
+            bin/packages/$ARCH/base/*luci-theme-win98*.[ai]pk
+          release_body_path: .dev/docs/changelog/${{ github.ref_name }}.md
