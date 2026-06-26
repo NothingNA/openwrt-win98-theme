@@ -28,10 +28,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-          # 移除 cache: "pip" 解决报错
 
-      - name: Install gh cli
-        run: sudo apt update && sudo apt install -y gh
+      - name: Install build tools & gh cli
+        run: sudo apt update && sudo apt install -y gh build-essential libncurses-dev gawk flex bison unzip
 
       - name: Build & upload OpenWrt APK for each commit
         env:
@@ -61,15 +60,24 @@ jobs:
             tag="apk-${short_sha}"
             out_file="dist/luci-theme-win98-${short_sha}.apk"
 
-            # 彻底清理工作区，防止不同提交文件污染
+            # 彻底清理工作区
             git reset --hard HEAD
             git clean -fdx
             git checkout --force "$sha"
 
-            # 调用 OpenWrt apk 打包脚本
-            python scripts/build_apk.py --out "$out_file"
+            # ========== 内置打包逻辑，不再调用外部py脚本 ==========
+            mkdir -p bin/packages
+            make compile
+            # 匹配生成的apk包并复制到dist
+            APK_SRC=$(find ./bin/packages -name "luci-theme-win98_*.apk" | head -n1)
+            if [ -z "$APK_SRC" ]; then
+              echo "ERROR: Build failed, no apk generated"
+              exit 1
+            fi
+            cp "$APK_SRC" "$out_file"
+            # =======================================================
 
-            # 上传/创建 Release
+            # 上传Release
             if gh release view "$tag" >/dev/null 2>&1; then
               echo "Release $tag exists, overwrite APK asset"
               gh release upload "$tag" "$out_file" --clobber
