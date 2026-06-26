@@ -4140,9 +4140,9 @@ input.cbi-input-checkbox {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 13px;
-    height: 13px;
-    min-width: 13px;
+    width: 12px;
+    height: 12px;
+    min-width: 12px;
     margin: 0 6px 0 0;
     padding: 0 !important;
     border: none;
