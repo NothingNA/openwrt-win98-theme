@@ -1,4 +1,4 @@
-name: Build OpenWrt APK
+name: Build IPK
 
 on:
   push:
@@ -12,75 +12,61 @@ permissions:
 
 jobs:
   release:
-    name: Build and release luci-theme-win98 OpenWrt APK
+    name: Build and release luci-theme-win98
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout theme source
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          path: theme-src
+          fetch-depth: 0
 
-      - name: Prepare dist dir
-        run: mkdir -p dist
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-      - name: Install gh cli
-        run: sudo apt update && sudo apt install -y gh
-
-      - name: Build APK via OpenWrt 25.12 SDK Docker
-        id: build
-        env:
-          TARGET: x86_64 # 根据你需要的架构修改，如 aarch64_cortex-a53
-        run: |
-          set -euo pipefail
-          # 拉取 OpenWrt 25.12 SDK 镜像
-          docker pull openwrt/sdk:25.12-x86_64
-          docker run --rm \
-            -v $PWD/theme-src:/package/luci-theme-win98 \
-            -v $PWD/dist:/dist \
-            openwrt/sdk:25.12-$TARGET \
-            sh -c "
-              # 更新 feeds
-              ./scripts/feeds update -a
-              ./scripts/feeds install luci
-              # 编译当前主题包
-              make package/luci-theme-win98/compile V=1
-              # 复制生成的 apk 到挂载目录
-              find bin/packages/*/luci-theme-win98_*.apk -exec cp {} /dist/ \;
-            "
-          # 获取包文件名
-          APK_FILE=$(ls dist/luci-theme-win98_*.apk | head -1)
-          echo "APK=$APK_FILE" >> $GITHUB_ENV
-
-      - name: Get commit list & upload release asset
+      - name: Build and publish release for each commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # 读取本次push所有commit
-          mapfile -t shas < <(python3 - <<'PY'
-          import json, os
-          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
-          for c in event.get("commits", []):
-              sha = c.get("id")
-              if sha: print(sha)
+
+          mapfile -t shas < <(python - <<'PY'
+          import json
+          import os
+
+          event_path = os.environ["GITHUB_EVENT_PATH"]
+          with open(event_path, "r", encoding="utf-8") as fh:
+              event = json.load(fh)
+
+          for commit in event.get("commits", []):
+              sha = commit.get("id")
+              if sha:
+                  print(sha)
           PY
           )
-          [ ${#shas[@]} -eq 0 ] && shas=("$GITHUB_SHA")
+
+          if [ "${#shas[@]}" -eq 0 ]; then
+            shas=("${GITHUB_SHA}")
+          fi
 
           for sha in "${shas[@]}"; do
+            git checkout --force "$sha"
+
             short_sha="${sha:0:12}"
-            tag="apk-${short_sha}"
-            out_file="dist/luci-theme-win98-${short_sha}.apk"
-            cp "${{ env.APK }}" "$out_file"
+            tag="ipk-${short_sha}"
+            out="dist/luci-theme-win98-${short_sha}.ipk"
+
+            python scripts/build_ipk.py --out "$out"
 
             if gh release view "$tag" >/dev/null 2>&1; then
-              gh release upload "$tag" "$out_file" --clobber
+              gh release upload "$tag" "$out" --clobber
             else
-              gh release create "$tag" "$out_file" \
+              gh release create "$tag" "$out" \
                 --target "$sha" \
-                --title "luci-theme-win98 OpenWrt APK ${short_sha}" \
-                --notes "Auto build OpenWrt 25.12 APK commit: \`$sha\`" \
+                --title "luci-theme-win98 ${short_sha}" \
+                --notes "Automated IPK build for commit ${sha}." \
                 --latest=false
-            done
+            fi
           done
