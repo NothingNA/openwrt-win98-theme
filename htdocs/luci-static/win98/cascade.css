@@ -4159,21 +4159,6 @@ input.cbi-input-checkbox {
     transition: none;
 }
 
-/* 悬停状态 */
-input[type="checkbox"]:hover,
-.cbi-input-checkbox:hover,
-input.cbi-input-checkbox:hover {
-    background: #ffffff;
-}
-
-/* 获得焦点 */
-input[type="checkbox"]:focus-visible,
-.cbi-input-checkbox:focus-visible,
-input.cbi-input-checkbox:focus-visible {
-    outline: 1px dotted var(--win98-dark);
-    outline-offset: 0;
-}
-
 /* 勾选状态 - 像素化小黑点（使用 box-shadow 绘制） */
 input[type="checkbox"]:checked::after,
 .cbi-input-checkbox:checked::after,
