@@ -4199,3 +4199,17 @@ label > .cbi-input-checkbox,
     margin: 0 auto;
     display: flex;
 }
+/* 临时修复 DDNS 界面 Win98 主题布局错位 */
+.cbi-value-field {
+    display: table-cell !important; 
+    width: auto !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+}
+.cbi-value-field .cbi-button {
+    display: inline-block !important;
+    vertical-align: middle !important;
+    margin-left: 8px !important;
+}
+
+EOF
